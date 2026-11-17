@@ -28,12 +28,15 @@ function drawBar(ctx, w, h, value, max) {
   drawOutlinedText(ctx, String(value), w / 2, 26, 46, '#ffffff', '#5a1430', 9);
 }
 
+let sharedParts = null; // geometry shared by the whole boss pool
+
 export class Boss {
   constructor(scene) {
+    // own material per boss: the hit flash is per instance
     this.material = new THREE.MeshPhongMaterial({
       vertexColors: true, shininess: 50, specular: 0x333333, emissive: 0xff3a1a, emissiveIntensity: 0,
     });
-    const g = bossParts();
+    const g = sharedParts || (sharedParts = bossParts());
     const P = BOSS_PIVOTS;
     this.group = new THREE.Group();
     this.body = new THREE.Mesh(g.body, this.material);
@@ -110,14 +113,14 @@ export class Boss {
     return _v.y;
   }
 
-  setup(def, z) {
+  /** joins the column at (x, z) with `hp`; def = the level's `bosses` block */
+  setup(def, x, z, hp) {
     this.alive = true;
     this.dying = false;
-    this.hp = this.maxHp = def.hp;
-    this.x = 0;
+    this.hp = this.maxHp = hp;
+    this.x = x;
     this.z = z;
     this.scale = def.scale;
-    this.speed = def.speed;
     this.flash = 0;
     this.walk = 0;
     this.entered = false;
@@ -127,6 +130,19 @@ export class Boss {
     this.barMesh.visible = false;
     this.group.rotation.set(0, 0, 0);
     this.group.scale.setScalar(this.scale);
+  }
+
+  /** out of play (pool slot free) */
+  hide() {
+    this.alive = false;
+    this.dying = false;
+    this.group.visible = false;
+    this.barMesh.visible = false;
+  }
+
+  /** radius of the ellipse the horde keeps clear of (x is stretched by 1.15) */
+  get footprint() {
+    return 1.15 * this.scale;
   }
 
   get halfW() {
@@ -158,10 +174,7 @@ export class Boss {
   }
 
   die(fx) {
-    this.alive = false;
-    this.dying = false;
-    this.group.visible = false;
-    this.barMesh.visible = false;
+    this.hide();
     const s = this.scale;
     fx.shards(this.x, 1.0 * s, this.z - 1.2 * s, 0xff8a2a, 0xa8481a, 120, 1.8 * s, 12, 1.5 * s);
     fx.shards(this.x, 1.0 * s, this.z - 2.4 * s, 0xf5ead0, 0xff9a3c, 40, 1.2 * s, 9, 1.0 * s);
@@ -221,9 +234,9 @@ export class Boss {
     if (!show) return;
     this.bar.set(this.hp, this.maxHp);
     const sc = this.scale;
-    // attached above the head. Safety net only: if the bar would ever reach the HUD it slides
-    // down over the body, never lower than the chest (the boss starts deep enough that this
-    // does not engage in normal play; barClamped reports it)
+    // attached above the head. Near the top of the view the bar would reach the HUD: it slides
+    // down over the body, never lower than the chest, and stays hidden while even that does not
+    // fit (bosses march in from deep in the column; barClamped reports the slide)
     const ay = this.barAnchorY();
     this.barTopNdc = this.barTopNdcAt(camera, this.x, this.z, sc);
     this.barClamped = false;
@@ -231,7 +244,13 @@ export class Boss {
       _v.set(this.x, 1.6 * sc, this.z).project(camera);
       const chestY = _v.y;
       _v.set(this.x, ay, this.z).project(camera);
-      _v.y = Math.max(_v.y - (this.barTopNdc - this.hudNdcY), chestY);
+      const y = _v.y - (this.barTopNdc - this.hudNdcY);
+      if (y < chestY) {
+        // boss still far up the column: no room below the HUD yet, show the bar once it is closer
+        this.barMesh.visible = false;
+        return;
+      }
+      _v.y = y;
       _v.unproject(camera);
       this.barMesh.position.copy(_v);
       this.barClamped = true;

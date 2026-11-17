@@ -8,8 +8,10 @@
 //
 // The horde streams in: `total` enemies, rows of `cols`, the first rows placed
 // from z = `z` back to the spawn line, the rest released from a reserve as the
-// column advances. The boss wades down the middle of the column from a start depth derived
-// from the camera (its HP bar must sit below the HUD) and is the level's clock.
+// column advances. Every so often a boss is embedded in the column (`bosses.at` = fraction of
+// the horde released before it) and marches with it. A boss that reaches the player smashes
+// `bosses.smash` launchers and dies; killing bosses does not end the level -- only clearing the
+// whole horde (and every boss in it) does.
 
 export const LEVELS = [
   {
@@ -20,7 +22,7 @@ export const LEVELS = [
     gates: { start: -6, end: -170, spacing: 4.0 },
     horde: { total: 500, cols: 6, spacing: 0.62, z: -13, march: 0.5, rush: 1.0, squeeze: 0.55 },
     block: null,
-    boss: { hp: 2000, speed: 0.17, scale: 1.0 },
+    bosses: { at: [0.35, 0.75], hp: [250, 350], scale: 0.85, smash: 3 },
   },
   {
     id: 2,
@@ -30,7 +32,7 @@ export const LEVELS = [
     gates: { start: -6, end: -190, spacing: 4.0 },
     horde: { total: 900, cols: 8, spacing: 0.56, z: -13, march: 0.8, rush: 1.8 },
     block: { hp: 50, z: -26, bonus: [6, 8] },
-    boss: { hp: 2600, speed: 0.22, scale: 1.15 },
+    bosses: { at: [0.25, 0.55, 0.85], hp: [300, 400, 500], scale: 0.9, smash: 4 },
   },
   {
     id: 3,
@@ -40,7 +42,7 @@ export const LEVELS = [
     gates: { start: -6, end: -210, spacing: 4.2 },
     horde: { total: 1400, cols: 8, spacing: 0.54, z: -13, march: 0.8, rush: 2.6 },
     block: { hp: 80, z: -26, bonus: [8, 12] },
-    boss: { hp: 3200, speed: 0.22, scale: 1.3 },
+    bosses: { at: [0.2, 0.45, 0.7, 0.92], hp: [350, 450, 550, 650], scale: 1.0, smash: 5 },
   },
 ];
 
@@ -59,4 +61,5 @@ export const WORLD = {
   unitSpeed: 20,
   unitMaxZ: -62, // default; main.js sets it to the top edge of the view
   maxLaunchers: 37, // full hex of radius 3
+  maxBosses: 4, // boss pool size (max bosses in one level)
 };

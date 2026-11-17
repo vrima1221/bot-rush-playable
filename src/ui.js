@@ -73,7 +73,7 @@ export class UI {
     this.el.badge.classList.add('hidden');
   }
 
-  /** horde progress: removed / total; boss marker lights up when the horde is gone */
+  /** horde progress: removed / total; boss marker lights up when the horde (bosses included) is gone */
   setProgress(removed, total) {
     const f = total > 0 ? Math.min(1, removed / total) : 0;
     const q = Math.round(f * 1000); // only touch the DOM when the visible value changes
@@ -101,7 +101,7 @@ export class UI {
     this.hideAll();
     this.el.badge.classList.add('hidden');
     this.el.endTitle.innerHTML = `LEVEL ${level}<br />CLEARED!`;
-    this.el.endText.textContent = level < total ? `Next: level ${level + 1} with a bigger boss.` : '';
+    this.el.endText.textContent = level < total ? `Next: level ${level + 1} with a bigger horde and more bosses.` : '';
     this.el.end.classList.remove('hidden');
   }
 
