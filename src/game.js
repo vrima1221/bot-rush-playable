@@ -294,7 +294,6 @@ export class Game {
     this.bossKills++;
     this.shake = Math.max(this.shake, 0.3);
     this.audio.play('bossDeath');
-    this.ui.popup('BOSS DOWN!', b.x, 4 * b.scale, b.z, 'big');
   }
 
   /** a boss reached the launchers: it slams down, takes `smash` of them with it and is gone */
@@ -508,7 +507,8 @@ export class Game {
     if (this.autoplay === 'smart' || this.autoplay === 'collect') {
       // keep the cluster's left edge on the +1 gates, cover as much of the centre lane as possible
       const reach = 1.5 * WORLD.laneScale + this.player.halfW - 0.3;
-      x = Math.max(-2.4, Math.min(0.6, WORLD.leftLaneX + reach));
+      // (a small cluster sits on the gates to grow first, then drifts into the centre lane)
+      x = Math.min(0.6, WORLD.leftLaneX + reach);
     }
     if (this.autoplay === 'smart') {
       const b = this.block;

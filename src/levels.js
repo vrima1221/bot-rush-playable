@@ -17,7 +17,7 @@ export const LEVELS = [
   {
     id: 1,
     fireRate: 7.5, // units per launcher per second
-    startLaunchers: 4,
+    startLaunchers: 1,
     buffSpeed: 3.2, // gates / pillar / bonus gates approach speed
     gates: { start: -6, end: -170, spacing: 4.0 },
     horde: { total: 500, cols: 6, spacing: 0.62, z: -13, march: 0.5, rush: 1.0, squeeze: 0.55 },
@@ -27,20 +27,20 @@ export const LEVELS = [
   {
     id: 2,
     fireRate: 6.5,
-    startLaunchers: 4,
+    startLaunchers: 1,
     buffSpeed: 3.2,
     gates: { start: -6, end: -190, spacing: 4.0 },
-    horde: { total: 900, cols: 8, spacing: 0.56, z: -13, march: 0.8, rush: 1.8 },
+    horde: { total: 900, cols: 8, spacing: 0.56, z: -28, march: 0.8, rush: 1.8 },
     block: { hp: 50, z: -26, bonus: [6, 8] },
     bosses: { at: [0.25, 0.55, 0.85], hp: [300, 400, 500], scale: 0.9, smash: 4 },
   },
   {
     id: 3,
     fireRate: 6.5,
-    startLaunchers: 4,
+    startLaunchers: 1,
     buffSpeed: 3.2,
     gates: { start: -6, end: -210, spacing: 4.2 },
-    horde: { total: 1400, cols: 8, spacing: 0.54, z: -13, march: 0.8, rush: 2.6 },
+    horde: { total: 1400, cols: 8, spacing: 0.54, z: -28, march: 0.8, rush: 2.6 },
     block: { hp: 80, z: -26, bonus: [8, 12] },
     bosses: { at: [0.2, 0.45, 0.7, 0.92], hp: [350, 450, 550, 650], scale: 1.0, smash: 5 },
   },
