@@ -1,6 +1,7 @@
 // Game state machine + world + per-frame simulation.
 //   intro -> playing -> levelWin -> endCard -> playing(next) ... -> final
 //   playing -> failing -> fail -> playing(retry)
+// A level is won only when the whole horde is gone, including the bosses marching inside it.
 import * as THREE from 'three';
 import { LEVELS, WORLD } from './levels.js';
 import {
@@ -58,6 +59,8 @@ export class Game {
     this.shake = 0;
     this.progress = 0;
     this.bossHitFrame = -1; // debug: frame index of the last boss damage
+    this.bossCount = 0; // bosses that have joined the column this level
+    this.bossKills = 0;
     this.frame = 0;
 
     this.buildWorld();
@@ -93,7 +96,8 @@ export class Game {
     this.gates = new SmallGates(scene);
     this.bonus = new BonusGates(scene);
     this.block = new Block(scene);
-    this.boss = new Boss(scene);
+    this.bosses = [];
+    for (let i = 0; i < WORLD.maxBosses; i++) this.bosses.push(new Boss(scene));
     this.fx = new FX(scene, enemyGeo, launcherGeo);
 
     this.onCollect = (x, z, v) => {
@@ -175,17 +179,34 @@ export class Game {
   }
 
   // ------------------------------------------------------------- levels
-  /** called from main.js on resize: HUD bottom edge in NDC (the boss fight must stay below it) */
+  /** called from main.js on resize: HUD bottom edge in NDC (boss HP bars stay below it) */
   onResize(hudNdcY) {
-    this.boss.hudNdcY = hudNdcY;
-    if (this.state === 'intro' && this.boss.alive && this.boss.hp === this.boss.maxHp) {
-      this.boss.z = this.boss.startZ(this.camera, this.level.boss.scale);
-      this.boss.update(0, 0, this.player.x, this.camera);
+    for (const b of this.bosses) {
+      b.hudNdcY = hudNdcY;
+      if (b.alive) b.update(0, 0, this.player.x, this.camera);
     }
   }
 
-  bossFootprint() {
-    return 1.15 * this.level.boss.scale;
+  /** bosses whose row has been released join the column (enemies in their footprint make room) */
+  spawnBosses() {
+    const h = this.horde;
+    const def = this.level.bosses;
+    while (h.bossSpawns.length) {
+      const z = h.bossSpawns.shift();
+      const i = this.bossCount++;
+      const b = this.bosses[i];
+      if (!def || !b || i >= def.hp.length) continue;
+      b.hudNdcY = this.bosses[0].hudNdcY;
+      b.setup(def, 0, z, def.hp[i]);
+      h.carve(b.x, b.z, b.footprint);
+      b.update(0, 0, this.player.x, this.camera);
+    }
+  }
+
+  bossesLeft() {
+    let n = 0;
+    for (const b of this.bosses) if (b.alive) n++;
+    return n;
   }
 
   loadLevel(idx) {
@@ -196,12 +217,14 @@ export class Game {
     this.ui.clearPopups();
     this.player.reset(L.startLaunchers);
     this.gates.setup(WORLD.leftLaneX, L.gates.start, L.gates.end, L.gates.spacing);
-    this.horde.setup(L.horde);
+    for (const b of this.bosses) b.hide();
+    this.bossCount = 0;
+    this.bossKills = 0;
+    this.horde.setup(L.horde, L.bosses ? L.bosses.at : []);
+    this.spawnBosses();
     this.block.setup(L.block, WORLD.rightLaneX);
     if (L.block) this.bonus.setup(L.block.bonus, WORLD.rightLaneX, L.block.z - 3.4);
     else this.bonus.clear();
-    this.boss.setup(L.boss, this.boss.startZ(this.camera, L.boss.scale));
-    this.boss.update(0, 0, this.player.x, this.camera);
     this.kills = 0;
     this.stateTime = 0;
     this.timeScale = 1;
@@ -241,11 +264,16 @@ export class Game {
     this.setState('playing');
   }
 
-  /** debug: instantly kill the boss of the current level */
+  /** debug: instantly wipe the horde and its bosses (the level is won once they are gone) */
   skip() {
     if (this.state === 'playing' || this.state === 'intro') {
       if (this.state === 'intro') this.setState('playing');
-      this.boss.hp = 0;
+      const h = this.horde;
+      for (let i = 0; i < h.count; i++) h.dead[i] = 1;
+      h.removed += h.reserve;
+      h.reserve = 0;
+      h.bossSpawns.length = 0;
+      for (const b of this.bosses) if (b.alive && !b.dying) b.hp = 0;
     }
   }
 
@@ -260,24 +288,35 @@ export class Game {
     this.audio.play('fail');
   }
 
-  bossDown() {
-    this.boss.startDeath();
-    this.timeScale = 0.45; // brief slow motion while it topples
-    this.shake = 0.35;
+  /** a boss ran out of HP: it topples, then shatters; the level goes on */
+  bossDown(b) {
+    b.startDeath();
+    this.bossKills++;
+    this.shake = Math.max(this.shake, 0.3);
     this.audio.play('bossDeath');
-    this.ui.popup('BOSS DOWN!', this.boss.x, 4, this.boss.z, 'big');
+    this.ui.popup('BOSS DOWN!', b.x, 4 * b.scale, b.z, 'big');
+  }
+
+  /** a boss reached the launchers: it slams down, takes `smash` of them with it and is gone */
+  bossSmash(b) {
+    const p = this.player;
+    const n = Math.min(this.level.bosses.smash, p.n);
+    for (let k = 0; k < n; k++) {
+      p.remove();
+      this.fx.launcherLost(p.lostX, p.lostZ, 1.25);
+    }
+    this.fx.puff(b.x, 0.5, p.z - 0.5, 0xff5c7a, 24, 3.5, 2);
+    b.die(this.fx);
+    this.shake = 0.6;
+    this.audio.play('bossDeath');
+    this.audio.play('lost');
+    if (n > 0) this.ui.popup('-' + n, b.x, 2.6, p.z - 0.5, 'bad');
+    if (p.n <= 0) this.beginFail();
   }
 
   finishWin() {
-    this.boss.die(this.fx);
-    this.shake = 0.5;
+    this.shake = Math.max(this.shake, 0.4);
     this.timeScale = 1;
-    const h = this.horde; // clear stragglers (only possible if the boss fell first)
-    for (let i = 0; i < h.count; i++) {
-      if (!h.dead[i]) { h.dead[i] = 1; this.fx.puff(h.x[i], 0.4, h.z[i], 0xb48cff, 1, 2); }
-    }
-    h.removed += h.reserve;
-    h.reserve = 0;
     this.player.firing = false;
     this.state = 'levelWin';
     this.stateTime = 0;
@@ -301,7 +340,7 @@ export class Game {
     const buff = active ? L.buffSpeed : 0;
     const march = active ? L.horde.march : 0;
 
-    this.player.firing = this.fireEnabled && active && !this.boss.dying;
+    this.player.firing = this.fireEnabled && active;
     this.player.update(dt, this.time, this.units, L.fireRate);
     if (this.player.shots > 0) this.audio.play('shot', 0.95 + Math.min(this.player.n, 37) * 0.012);
     this.units.move(dt, WORLD.unitSpeed, this.unitMaxZ);
@@ -309,22 +348,29 @@ export class Game {
     const collect = active ? this.onCollect : noop;
     this.gates.update(dt, buff, this.player, collect);
     this.bonus.update(dt, buff, this.player, collect);
-    const bossBlocks = this.boss.alive && !this.boss.dying;
-    this.horde.move(dt, march, this.player.x, this.boss.x, this.boss.z, bossBlocks ? this.bossFootprint() : 0);
+    const bosses = this.bosses;
+    let lead = -999; // a boss leading the column counts as its front
+    for (const b of bosses) if (b.alive && !b.dying && b.z > lead) lead = b.z;
+    this.horde.move(dt, march, this.player.x, bosses, lead);
+    this.spawnBosses();
 
-    const boss = this.boss;
-    // the boss wades down the middle of the column from the start (always in view) and is the
-    // level's clock: it must fall before it reaches the player line
-    const bv = active && boss.alive && !boss.dying ? boss.speed : 0;
-    if (boss.update(dt, bv, this.player.x, this.camera)) this.finishWin();
-    if (active && boss.alive && boss.onScreen && !boss.entered) {
-      boss.entered = true;
-      this.audio.play('bossEnter');
+    // bosses are embedded in the column and march at its pace
+    const bv = active && dt > 0 ? this.horde.step / dt : 0;
+    for (const b of bosses) {
+      if (!b.alive) continue;
+      if (b.update(dt, b.dying ? 0 : bv, this.player.x, this.camera)) {
+        b.die(this.fx);
+        this.shake = Math.max(this.shake, 0.4);
+      }
+      if (active && b.alive && b.onScreen && !b.entered) {
+        b.entered = true;
+        this.audio.play('bossEnter');
+      }
     }
 
     if (active || st === 'levelWin' || st === 'failing') this.collide(dt, march);
     // labels refresh after collisions so numbers change on the frame of contact
-    boss.refreshBar(this.camera);
+    for (const b of bosses) b.refreshBar(this.camera);
     this.block.refreshLabel(this.camera);
 
     if (active) {
@@ -340,7 +386,11 @@ export class Game {
           this.bonus.discard();
         }
       }
-      if (this.state === 'playing' && boss.alive && !boss.dying && boss.hp <= 0) this.bossDown();
+      if (this.state === 'playing') {
+        for (const b of bosses) if (b.alive && !b.dying && b.hp <= 0) this.bossDown(b);
+        // the level ends only when the whole horde is gone, bosses included
+        if (this.horde.cleared && this.bossesLeft() === 0) this.finishWin();
+      }
     }
     this.block.update(dt, buff, this.camera);
 
@@ -375,7 +425,8 @@ export class Game {
     // both moved this frame, so fast units never tunnel through a target
     const win = HIT_R + (WORLD.unitSpeed + enemySpeed) * dt;
     const block = this.block;
-    const boss = this.boss;
+    const bosses = this.bosses;
+    const nb = bosses.length;
     const fx = this.fx;
     let kills = 0, blockHits = 0, bossHits = 0;
     for (let i = 0; i < u.count; i++) {
@@ -409,11 +460,14 @@ export class Game {
         if ((i & 1) === 0) fx.puff(x, 0.8 + (i % 5) * 0.3, block.z + 1.1, 0xb9a8ff, 1, 1.4);
         continue;
       }
-      if (boss.hits(x, z)) {
+      for (let b = 0; b < nb; b++) {
+        const boss = bosses[b];
+        if (!boss.hits(x, z)) continue;
         ud[i] = 1;
         boss.damage(1);
         bossHits++;
         if ((i & 1) === 0) fx.puff(x, 0.6 + (i % 7) * 0.35 * boss.scale, boss.front, 0xffb066, 1, 1.6);
+        break;
       }
     }
     this.kills += kills;
@@ -442,10 +496,9 @@ export class Game {
         return;
       }
     }
-    if (this.boss.alive && !this.boss.dying && this.boss.front >= p.z + p.front) {
-      this.fx.puff(p.x, 0.5, p.z, 0xff5c7a, 20, 3);
-      p.n = 0;
-      this.beginFail();
+    for (const b of this.bosses) {
+      if (this.state !== 'playing') return;
+      if (b.alive && !b.dying && b.front >= p.z + p.front) this.bossSmash(b);
     }
   }
 
@@ -486,9 +539,12 @@ export class Game {
       hordeFront: +front.toFixed(2),
       fx: this.fx.puffs.count + this.fx.debris.count + this.fx.dying.count + this.fx.wrecks.count,
       dying: this.fx.dying.count,
-      bossHp: this.boss.hp,
-      bossAlive: this.boss.alive,
-      bossZ: +this.boss.z.toFixed(2),
+      bossHp: this.bosses.filter((b) => b.alive).map((b) => b.hp),
+      bossZ: this.bosses.filter((b) => b.alive).map((b) => +b.z.toFixed(2)),
+      bossesLeft: this.bossesLeft(),
+      bossesSpawned: this.bossCount,
+      bossesTotal: this.level.bosses ? this.level.bosses.hp.length : 0,
+      bossKills: this.bossKills,
       blockHp: this.block.active ? this.block.hp : null,
       kills: this.kills,
       playerX: +this.player.x.toFixed(2),
